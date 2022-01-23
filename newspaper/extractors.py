@@ -640,7 +640,10 @@ class ContentExtractor(object):
         ldDefs = self.parser.getElementsByTag(doc, tag='script', attr="type", value='application/ld+json')
         allitems={}
         for ldDef in ldDefs:
-            data = json.loads(ldDef.text)
+            try:
+                data = json.loads(ldDef.text)
+            except:
+                continue
             if allitems:
                 allitems.update(data)
             else:
