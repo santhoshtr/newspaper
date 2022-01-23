@@ -14,6 +14,7 @@ __copyright__ = 'Copyright 2014, Lucas Ou-Yang'
 import copy
 import logging
 import re
+import json
 import re
 from collections import defaultdict
 
@@ -133,7 +134,16 @@ class ContentExtractor(object):
 
             return _authors
 
-        # Try 1: Search popular author tags for authors
+        # Try 1: Json LD
+        jsonLd = self.getJsonLinkedData(doc)
+        if 'author' in jsonLd:
+            authors = jsonLd['author']
+            if isinstance(authors,list):
+                return authors
+            else:
+                return [authors]
+
+        # Try 2: Search popular author tags for authors
 
         ATTRS = ['name', 'rel', 'itemprop', 'class', 'id']
         VALS = ['author', 'byline', 'dc.creator', 'byl']
@@ -159,7 +169,7 @@ class ContentExtractor(object):
 
         return uniqify_list(authors)
 
-        # TODO Method 2: Search raw html for a by-line
+        # TODO Method 3: Search raw html for a by-line
         # match = re.search('By[\: ].*\\n|From[\: ].*\\n', html)
         # try:
         #    # Don't let zone be too long
@@ -174,7 +184,8 @@ class ContentExtractor(object):
         are descending in accuracy and the next strategy is only
         attempted if a preferred one fails.
 
-        1. Pubdate from URL
+        1. published data from JSON LD
+        2. Pubdate from URL
         2. Pubdate from metadata
         3. Raw regex searches in the HTML + added heuristics
         """
@@ -187,6 +198,12 @@ class ContentExtractor(object):
                     # near all parse failures are due to URL dates without a day
                     # specifier, e.g. /2014/04/
                     return None
+
+        jsonLd = self.getJsonLinkedData(doc)
+        if 'dateModified' in jsonLd:
+            return jsonLd['dateModified']
+        if 'datePublished' in jsonLd:
+            return jsonLd['datePublished']
 
         date_match = re.search(urls.STRICT_DATE_REGEX, url)
         if date_match:
@@ -480,11 +497,21 @@ class ContentExtractor(object):
         return self.get_meta_content(doc, 'meta[property="og:site_name"]')
 
     def get_meta_description(self, doc):
+        jsonLd = self.getJsonLinkedData(doc)
+        if 'description' in jsonLd:
+            return jsonLd['description']
         """If the article has meta description set in the source, use that
         """
         return self.get_meta_content(doc, "meta[name=description]")
 
     def get_meta_keywords(self, doc):
+        jsonLd = self.getJsonLinkedData(doc)
+        if 'keywords' in jsonLd:
+            keywords = jsonLd['keywords']
+            if isinstance(keywords, list):
+                keywords = ','.join(keywords)
+
+            return keywords
         """If the article has meta keywords set in the source, use that
         """
         return self.get_meta_content(doc, "meta[name=keywords]")
@@ -603,6 +630,26 @@ class ContentExtractor(object):
         if titles:
             return [(a.get('href'), a.text) for a in a_tags if a.get('href')]
         return [a.get('href') for a in a_tags if a.get('href')]
+
+    def getJsonLinkedData(self, doc)->dict:
+        """Return the JSON-LD metadata in the page.
+        """
+        if doc is None:
+            return []
+
+        ldDefs = self.parser.getElementsByTag(doc, tag='script', attr="type", value='application/ld+json')
+        allitems={}
+        for ldDef in ldDefs:
+            data = json.loads(ldDef.text)
+            if allitems:
+                allitems.update(data)
+            else:
+                if isinstance(data, list):
+                    for item in data:
+                         allitems.update(item)
+                else:
+                    allitems = data
+        return {key: value for (key, value) in allitems.items()}
 
     def get_urls(self, doc_or_html, titles=False, regex=False):
         """`doc_or_html`s html page or doc and returns list of urls, the regex
